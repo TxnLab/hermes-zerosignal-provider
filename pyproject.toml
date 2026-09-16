@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-zerosignal-provider"
+version = "0.1.0"
+description = "ZeroSignal model-provider plugin for Hermes Agent"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "TxnLab" }]
+# Tracks hermes-agent's own requires-python.
+requires-python = ">=3.11,<3.14"
+# The plugin has no runtime dependencies beyond Hermes itself, which loads it.
+dependencies = []
+
+[project.optional-dependencies]
+# Development only. hermes-agent itself is NOT listed here: its setup.py refuses to build a
+# wheel outside Nix, so it can only be installed editable from a checkout. The pinned commit
+# lives in [tool.hermes-zerosignal-provider] below; see README "Development" and
+# .github/workflows/validate.yml for the install steps.
+dev = ["pytest", "pyyaml"]
+
+[project.urls]
+Homepage = "https://github.com/TxnLab/hermes-zerosignal-provider"
+Documentation = "https://docs.zerosignal.ai/using-the-proxy/guides/hermes"
+
+# This is a directory plugin (Hermes imports __init__.py from the plugin directory), not an
+# importable distribution: nothing is packaged. The project table exists so `pip install
+# -e .[dev]` pulls the dev tools and so the Hermes pin has a home.
+[tool.setuptools]
+packages = []
+py-modules = []
+
+# Exact hermes-agent commit the plugin was built and validated against. Single source of
+# truth: the CI workflow reads it from here. Bump it, re-run `hermes plugins validate .`
+# and the tests, and note the upstream range in the commit message.
+[tool.hermes-zerosignal-provider]
+hermes_ref = "d5b3cad7b98b3bcd157ea8b585759b0bb4fb8a6d"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
