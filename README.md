@@ -52,8 +52,11 @@ Run `hermes model`, pick **ZeroSignal**, and choose a model.
 | `ZEROSIGNAL_BASE_URL` | Optional. Set it if the proxy listens somewhere other than `http://127.0.0.1:9376/v1`. |
 
 The Hermes reasoning effort (`agent.reasoning_effort` in `config.yaml`, or `--reasoning` on
-the command line) is sent to the proxy as a top-level `reasoning_effort`. The plugin does not
-clamp it per model; the serving node applies whatever levels it supports.
+the command line) is sent to the proxy as a top-level `reasoning_effort`. Serving nodes
+reject levels outside what they declare, so the plugin clamps the requested level onto the
+model's `allowed_efforts` from the proxy's `/v1/models` catalog, never upward (Hermes'
+default `medium` becomes `low` on a node that declares `low/high/max`). Models the catalog
+does not describe get the request as-is.
 
 ## Development
 

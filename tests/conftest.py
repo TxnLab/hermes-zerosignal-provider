@@ -14,11 +14,15 @@ Mirrors the hermetic-test invariants of hermes-agent's own ``tests/conftest.py``
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import shutil
+import socket
 import sys
 import tempfile
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
@@ -85,3 +89,84 @@ def fresh_hermes_home(tmp_path, monkeypatch):
     clear_provider_caches()
     yield tmp_path
     clear_provider_caches()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_catalog_cache(zerosignal_profile):
+    """Every test starts with an empty per-model reasoning cache and leaves none behind."""
+    module = sys.modules[type(zerosignal_profile).__module__]
+    module.reset_catalog_cache()
+    yield
+    module.reset_catalog_cache()
+
+
+# ── A loopback stand-in for zs-proxy's /v1/models ──────────────────────────────────────
+
+# Entries shaped like the real proxy's catalog (extra fields are ignored; ``reasoning`` is
+# what the effort clamp reads). Values mirror what operators declared on 2026-09-16.
+PROXY_CATALOG = [
+    {
+        "id": "glm-5.3-flash", "object": "model", "owned_by": "zerosignal",
+        "context_length": 1000000,
+        "pricing": {"prompt": "0.00000009075", "completion": "0.0000003025"},
+        "reasoning": {"supported": True, "allowed_efforts": ["low", "high", "max"]},
+        "tool_use": True,
+    },
+    {"id": "glm-5.2", "object": "model",
+     "reasoning": {"supported": True,
+                   "allowed_efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]}},
+    {"id": "kimi-k3", "object": "model",
+     "reasoning": {"supported": True, "allowed_efforts": ["low", "high", "max"]}},
+    {"id": "glm-4.7-flash", "object": "model", "reasoning": {"supported": True}},
+    {"id": "mistralai/Mistral-Nemo-Instruct-2407", "object": "model", "reasoning": {"supported": False}},
+    {"id": "moonshotai/kimi-k2.7-code", "object": "model"},
+    {"id": "some/vendor-tier-model", "object": "model",
+     "reasoning": {"supported": True, "allowed_efforts": ["turbo", "high"]}},  # unknown tier dropped
+]
+
+
+class ProxyModelsStub(BaseHTTPRequestHandler):
+    """Serves ``/v1/models`` like zs-proxy and records every request's headers."""
+
+    models: list[dict] = []
+    seen_headers: list[dict] = []
+
+    def do_GET(self):
+        type(self).seen_headers.append({k.lower(): v for k, v in self.headers.items()})
+        if self.path.rstrip("/").endswith("/models"):
+            body = json.dumps({"object": "list", "data": self.models}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):  # noqa: A002 — BaseHTTPRequestHandler's signature
+        pass
+
+
+@pytest.fixture
+def proxy_stub():
+    """A live loopback stub; yields ``(base_url, handler_class)``."""
+    ProxyModelsStub.models = [dict(m) for m in PROXY_CATALOG]
+    ProxyModelsStub.seen_headers = []
+    server = HTTPServer(("127.0.0.1", 0), ProxyModelsStub)
+    Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}/v1", ProxyModelsStub
+    finally:
+        server.shutdown()
+
+
+def unused_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+@pytest.fixture
+def dead_proxy_url() -> str:
+    """A loopback base URL nothing listens on (connection refused)."""
+    return f"http://127.0.0.1:{unused_port()}/v1"
