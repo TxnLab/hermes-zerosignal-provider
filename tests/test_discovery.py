@@ -54,7 +54,11 @@ def test_profile_metadata(zerosignal_profile):
     assert p.name == "zerosignal"
     assert p.display_name == "ZeroSignal"
     assert p.auth_type == "api_key"
-    assert p.api_mode == "chat_completions"
+    # Responses is ZeroSignal's preferred wire. Hermes resolves this through
+    # determine_api_mode, which has no host mandate for 127.0.0.1, so the profile's value is
+    # honoured; the chat wire stays reachable per-model via model.api_mode.
+    assert p.api_mode == "codex_responses"
+    assert p.supports_vision is True
     assert p.env_vars == ("ZEROSIGNAL_API_KEY", "ZEROSIGNAL_BASE_URL")
     assert p.base_url == DEFAULT_BASE_URL
     assert p.supports_health_check is True
@@ -68,6 +72,43 @@ def test_aliases_resolve_to_the_canonical_profile(zerosignal_profile, alias):
     from providers import get_provider_profile
 
     assert get_provider_profile(alias) is zerosignal_profile
+
+
+def test_hermes_actually_resolves_the_profile_onto_the_responses_wire(zerosignal_profile):
+    """The profile attribute is not the wire — ``determine_api_mode`` is.
+
+    It never reads ``profile.api_mode``. It resolves a transport through
+    ``get_provider()`` and maps that, and two earlier branches can force
+    ``chat_completions`` outright: ``is_actual_route`` and a host mandate on the base URL.
+    Asserting the attribute alone would pass while Hermes sent chat completions, so this
+    drives the real resolver.
+    """
+    from hermes_cli.providers import determine_api_mode
+
+    assert determine_api_mode("zerosignal", DEFAULT_BASE_URL, "glm-5.3") == "codex_responses"
+
+
+def test_a_models_dev_entry_would_silently_take_the_wire_back(zerosignal_profile):
+    """``get_provider`` checks models.dev BEFORE the plugin-profile branch.
+
+    The profile's ``api_mode`` is honoured only by the last branch, which builds a
+    ProviderDef by reverse-mapping it. A models.dev entry short-circuits ahead of that, and
+    its default overlay transport is ``openai_chat`` — so publishing ZeroSignal to models.dev
+    flips this plugin back to chat completions with no change here and no error. The fix at
+    that point is a HERMES_OVERLAYS entry upstream, not an edit to this repo.
+
+    This pins the precedence so the day it happens is a failure here rather than a silent
+    downgrade of the wire in production.
+    """
+    from hermes_cli.providers import get_provider
+
+    pdef = get_provider("zerosignal")
+    assert pdef is not None
+    assert pdef.source == "plugin-profile", (
+        "zerosignal now resolves from %r; its transport no longer comes from this profile's "
+        "api_mode — add a HERMES_OVERLAYS entry upstream" % pdef.source
+    )
+    assert pdef.transport == "codex_responses"
 
 
 # ── Core auto-wiring from the registered profile ────────────────────────────────────────
