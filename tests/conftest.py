@@ -102,26 +102,43 @@ def _fresh_catalog_cache(zerosignal_profile):
 
 # ── A loopback stand-in for zs-proxy's /v1/models ──────────────────────────────────────
 
-# Entries shaped like the real proxy's catalog (extra fields are ignored; ``reasoning`` is
-# what the effort clamp reads). Values mirror what operators declared on 2026-09-16.
+# Entries shaped like the real proxy's catalog (extra fields are ignored). ``reasoning`` is
+# what the effort clamp reads; ``architecture`` and ``pricing`` are what the vision and
+# auxiliary-model picks read. Values mirror what operators declared on 2026-09-16; the
+# per-token ``pricing`` strings are the proxy's own payer-net shape.
 PROXY_CATALOG = [
     {
         "id": "glm-5.3-flash", "object": "model", "owned_by": "zerosignal",
         "context_length": 1000000,
+        "architecture": {"input_modalities": ["text", "image"], "output_modalities": ["text"]},
         "pricing": {"prompt": "0.00000009075", "completion": "0.0000003025"},
         "reasoning": {"supported": True, "allowed_efforts": ["low", "high", "max"]},
         "tool_use": True,
     },
     {"id": "glm-5.2", "object": "model",
+     "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]},
+     "pricing": {"prompt": "0.0000004", "completion": "0.0000012"},
      "reasoning": {"supported": True,
                    "allowed_efforts": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]}},
     {"id": "kimi-k3", "object": "model",
+     "pricing": {"prompt": "0.0000002", "completion": "0.0000006"},
      "reasoning": {"supported": True, "allowed_efforts": ["low", "high", "max"]}},
-    {"id": "glm-4.7-flash", "object": "model", "reasoning": {"supported": True}},
+    # Cheapest text model in the catalog — the auxiliary pick when no vision is needed.
+    {"id": "glm-4.7-flash", "object": "model",
+     "pricing": {"prompt": "0.00000002", "completion": "0.00000008"},
+     "reasoning": {"supported": True}},
+    # No pricing block: the proxy omits one for free and image-only routes, and an entry
+    # without a token price must never be chosen as an auxiliary or vision default.
     {"id": "mistralai/Mistral-Nemo-Instruct-2407", "object": "model", "reasoning": {"supported": False}},
-    {"id": "moonshotai/kimi-k2.7-code", "object": "model"},
+    {"id": "moonshotai/kimi-k2.7-code", "object": "model",
+     "architecture": {"input_modalities": ["text", "image"], "output_modalities": ["text"]},
+     "pricing": {"prompt": "0.0000003", "completion": "0.0000009"}},
     {"id": "some/vendor-tier-model", "object": "model",
      "reasoning": {"supported": True, "allowed_efforts": ["turbo", "high"]}},  # unknown tier dropped
+    # Cheapest entry of all, but it cannot answer in text: it must lose every pick.
+    {"id": "some/image-only-model", "object": "model",
+     "architecture": {"input_modalities": ["text"], "output_modalities": ["image"]},
+     "pricing": {"prompt": "0.000000005", "completion": "0.00000001"}},
 ]
 
 
@@ -170,3 +187,15 @@ def unused_port() -> int:
 def dead_proxy_url() -> str:
     """A loopback base URL nothing listens on (connection refused)."""
     return f"http://127.0.0.1:{unused_port()}/v1"
+
+
+@pytest.fixture
+def seeded(zerosignal_profile, proxy_stub):
+    """Profile whose catalog cache was seeded the way the picker seeds it: via fetch_models.
+
+    Returns ``(profile, base_url, handler_class)``. Seeding also records the stub's base URL
+    as the active proxy, which is what the per-request hooks key their cache lookups on.
+    """
+    base_url, stub = proxy_stub
+    assert zerosignal_profile.fetch_models(api_key="zerosignal-local", base_url=base_url)
+    return zerosignal_profile, base_url, stub

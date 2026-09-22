@@ -1,5 +1,5 @@
 name: zerosignal
 kind: model-provider
-version: 0.1.0
+version: 0.2.0
 description: ZeroSignal — local proxy onto a pay-per-request, private inference network
 author: TxnLab

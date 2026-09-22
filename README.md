@@ -6,7 +6,7 @@ inference network. Your wallet is the credential, so there is no API key to mana
 
 With the plugin installed, ZeroSignal appears as a provider in `hermes model` and `/model`,
 the picker lists the models the proxy currently serves, and Hermes' reasoning-effort setting
-is forwarded to the network as `reasoning_effort`.
+is forwarded to the network.
 
 ## Prerequisites
 
@@ -51,12 +51,64 @@ Run `hermes model`, pick **ZeroSignal**, and choose a model.
 | `ZEROSIGNAL_API_KEY` | Required by Hermes, ignored by the proxy. Any non-empty value. |
 | `ZEROSIGNAL_BASE_URL` | Optional. Set it if the proxy listens somewhere other than `http://127.0.0.1:9376/v1`. |
 
+### Wire protocol
+
+Requests use the Responses API, which is ZeroSignal's preferred wire — reasoning effort goes
+native as `reasoning.effort` rather than a top-level scalar. Chat completions is still fully
+supported and tested; select it per-model with:
+
+```yaml
+model:
+  api_mode: chat_completions
+```
+
+Two things had to land before Responses could be the default, and both have.
+
+Hermes' Responses transport attaches a `prompt_cache_key` that is constant for a whole
+session and identical whichever operator serves a turn, and a profile cannot turn it off. The
+proxy now strips it before sealing, so it never reaches a node. This is defense in depth
+rather than a new guarantee — an operator that serves a turn decrypts the conversation and
+sees your payer address regardless — but the token was a short, opaque join key that survived
+context truncation and compaction, which is exactly where matching on the prompt itself stops
+working.
+
+And a node only serves `/v1/responses` when its backend implements it natively or the
+operator enabled `llm.openai.translate_responses_to_chat`. Nothing advertises that capability
+and nothing routes on it, so a misconfigured operator used to answer 404 with no way for the
+proxy to try elsewhere. Nodes now probe the route at startup and refuse to boot without it.
+
+Both wires clamp the reasoning effort; the rest of this section applies to either.
+
+### Reasoning effort
+
 The Hermes reasoning effort (`agent.reasoning_effort` in `config.yaml`, or `--reasoning` on
-the command line) is sent to the proxy as a top-level `reasoning_effort`. Serving nodes
-reject levels outside what they declare, so the plugin clamps the requested level onto the
-model's `allowed_efforts` from the proxy's `/v1/models` catalog, never upward (Hermes'
-default `medium` becomes `low` on a node that declares `low/high/max`). Models the catalog
-does not describe get the request as-is.
+the command line) is sent to the proxy, and the requested level is clamped onto the model's
+`allowed_efforts` from the proxy's `/v1/models` catalog (Hermes' default `medium` becomes
+`low` on a node that declares `low/high/max`). Models the catalog does not describe get the
+transport's own vocabulary.
+
+Two caveats worth knowing. `allowed_efforts` on that endpoint is a union across every
+operator serving the model, not any single node's list, and nothing routes on it — so a
+level inside the union can still be refused by the operator that gets the request. And the
+clamp is not purely downward: when nothing weaker than your request is supported it selects
+the weakest level that is, which for an under-declared model means paying for more reasoning
+tokens than you asked for.
+
+On the Responses wire there is also no "send nothing and let the model decide" — the
+transport always sends an effort, defaulting to `medium`.
+
+### Model capabilities
+
+Image input, and the model used for fast side tasks like title generation, are read from the
+live catalog rather than pinned in source — the cheapest catalog model that can answer in
+text wins, and entries the proxy did not price are skipped. Most auxiliary work still uses
+the curated `default_aux_model`, because Hermes only consults the catalog hook on its
+`prefer_fast` path.
+
+The plugin deliberately sets **no** `max_tokens` cap. With the field absent the proxy sizes
+each reservation from the chosen operator's own declared capacity; a fixed ceiling would
+replace that with one guessed number and exclude operators whose context window cannot
+honour it.
 
 ## Development
 
