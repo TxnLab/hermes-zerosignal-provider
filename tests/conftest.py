@@ -44,6 +44,9 @@ def clear_provider_caches() -> None:
 
     Same reset hermes-agent's discovery tests use: empty the registry, drop the cached
     list, and evict imported plugin modules so their ``register_provider`` runs again.
+    Hermes also keeps ``$HERMES_HOME`` plugins in per-home layers and re-imports one only
+    when its files change, so the layers go too; otherwise the profile keeps being served
+    from a layer whose module was just evicted, and "fresh" would not be.
     """
     import providers as _pkg
 
@@ -51,6 +54,10 @@ def clear_provider_caches() -> None:
     _pkg._ALIASES.clear()
     _pkg._PROVIDER_LIST_CACHE = None
     _pkg._discovered = False
+    layers = getattr(_pkg, "_HOME_LAYERS", None)
+    if layers is not None:
+        with _pkg._HOME_LAYERS_LOCK:
+            layers.clear()
     for mod in list(sys.modules):
         if mod.startswith(("plugins.model_providers", "_hermes_user_provider")):
             del sys.modules[mod]
@@ -91,13 +98,25 @@ def fresh_hermes_home(tmp_path, monkeypatch):
     clear_provider_caches()
 
 
+@pytest.fixture
+def plugin_globals(zerosignal_profile):
+    """The namespace of the plugin module Hermes actually loaded, for ``monkeypatch.setitem``.
+
+    Reached through a method's ``__globals__`` rather than by name in ``sys.modules``: Hermes
+    loads a ``$HERMES_HOME`` plugin under a per-home, content-fingerprinted module name, and
+    whether that entry is in ``sys.modules`` at a given moment depends on discovery state the
+    suite resets. The function globals are the module's own dict regardless, so patching
+    them is what the plugin's code sees.
+    """
+    return type(zerosignal_profile).create_client.__globals__
+
+
 @pytest.fixture(autouse=True)
-def _fresh_catalog_cache(zerosignal_profile):
+def _fresh_catalog_cache(plugin_globals):
     """Every test starts with an empty per-model reasoning cache and leaves none behind."""
-    module = sys.modules[type(zerosignal_profile).__module__]
-    module.reset_catalog_cache()
+    plugin_globals["reset_catalog_cache"]()
     yield
-    module.reset_catalog_cache()
+    plugin_globals["reset_catalog_cache"]()
 
 
 # ── A loopback stand-in for zs-proxy's /v1/models ──────────────────────────────────────

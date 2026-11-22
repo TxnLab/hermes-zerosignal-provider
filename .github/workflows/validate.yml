@@ -13,7 +13,11 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # The pinned Hermes declares its dependencies for 3.14 only, and its uv.lock
+          # resolves nowhere else.
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@v6
 
       - name: Read the pinned hermes-agent commit
         # Single source of truth: [tool.hermes-zerosignal-provider].hermes_ref in pyproject.toml.
@@ -25,16 +29,20 @@ jobs:
 
       - name: Install pinned hermes-agent (editable) and dev deps
         # hermes-agent's setup.py refuses to build a wheel outside Nix, so a plain
-        # `pip install git+...` fails; an editable install from a checkout at the pinned
-        # commit is the supported route.
+        # `pip install git+...` fails. Its locked environment is the supported route: a
+        # checkout at the pinned commit, `uv sync --frozen`, then the plugin's dev tools
+        # into that same venv. (`pip install -e` of the checkout no longer resolves.) The
+        # checkout lives outside the plugin directory: `hermes plugins validate .` scans every
+        # file under it, and Hermes' own sources fail the plugin isolation checks.
         run: |
           set -euo pipefail
-          git init -q hermes-agent-src
-          git -C hermes-agent-src fetch -q --depth 1 https://github.com/NousResearch/hermes-agent "${HERMES_REF}"
-          git -C hermes-agent-src checkout -q FETCH_HEAD
-          python -m pip install --upgrade pip
-          pip install -e ./hermes-agent-src
-          pip install -e ".[dev]"
+          src="${RUNNER_TEMP}/hermes-agent-src"
+          git init -q "${src}"
+          git -C "${src}" fetch -q --depth 1 https://github.com/NousResearch/hermes-agent "${HERMES_REF}"
+          git -C "${src}" checkout -q FETCH_HEAD
+          (cd "${src}" && uv sync --frozen --python "$(command -v python)")
+          uv pip install --python "${src}/.venv/bin/python" -e ".[dev]"
+          echo "${src}/.venv/bin" >> "$GITHUB_PATH"
 
       - name: hermes plugins validate
         # The same admission check the Hermes plugin-catalog CI runs against a candidate entry.
