@@ -114,14 +114,18 @@ honour it.
 
 The plugin is validated and tested against one pinned `hermes-agent` commit, recorded as
 `hermes_ref` under `[tool.hermes-zerosignal-provider]` in `pyproject.toml`. Hermes does not
-build wheels outside Nix, so install it editable from a checkout at that commit:
+build wheels outside Nix, so install it from a checkout at that commit through its own
+`uv.lock`, which needs Python 3.14 and [uv](https://docs.astral.sh/uv/). Clone it outside
+this directory: `hermes plugins validate .` scans every file under the plugin, Hermes' own
+sources included. (Earlier instructions cloned it to `./hermes-agent-src`; delete that
+copy, or validation fails.)
 
 ```sh
-python3.11 -m venv .venv && . .venv/bin/activate
-ref="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["tool"]["hermes-zerosignal-provider"]["hermes_ref"])')"
-git clone https://github.com/NousResearch/hermes-agent hermes-agent-src && git -C hermes-agent-src checkout "$ref"
-pip install -e ./hermes-agent-src
-pip install -e ".[dev]"
+ref="$(uv run --no-project --python 3.14 python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["tool"]["hermes-zerosignal-provider"]["hermes_ref"])')"
+git clone https://github.com/NousResearch/hermes-agent ../hermes-agent-src && git -C ../hermes-agent-src checkout "$ref"
+(cd ../hermes-agent-src && uv sync --frozen --python 3.14)
+uv pip install --python ../hermes-agent-src/.venv/bin/python -e ".[dev]"
+. ../hermes-agent-src/.venv/bin/activate
 
 hermes plugins validate .    # the catalog admission check
 pytest

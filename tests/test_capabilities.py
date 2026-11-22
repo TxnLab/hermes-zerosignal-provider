@@ -91,7 +91,7 @@ def test_curated_aux_constant_remains_the_cold_cache_fallback(zerosignal_profile
 # ── Which proxy the hooks read ──────────────────────────────────────────────────────────
 
 
-def test_a_picker_probe_elsewhere_cannot_redirect_the_hooks(zerosignal_profile, proxy_stub, monkeypatch):
+def test_a_picker_probe_elsewhere_cannot_redirect_the_hooks(zerosignal_profile, plugin_globals, proxy_stub, monkeypatch):
     """The base an inference client was built against is where requests actually go, so it
     outranks any base a catalog fetch merely succeeded against.
 
@@ -100,15 +100,12 @@ def test_a_picker_probe_elsewhere_cannot_redirect_the_hooks(zerosignal_profile, 
     default; the per-request hooks must keep describing the proxy the requests go to, or
     every later turn is clamped against a vocabulary from the wrong machine.
     """
-    import sys
-
     base_url, _stub = proxy_stub
-    module = sys.modules[type(zerosignal_profile).__module__]
     zerosignal_profile.create_client(base_url=base_url, api_key="zerosignal-local")
     assert zerosignal_profile.resolve_aux_model() == "glm-4.7-flash"
 
-    monkeypatch.setattr(
-        module, "_fetch_catalog_items",
+    monkeypatch.setitem(
+        plugin_globals, "_fetch_catalog_items",
         lambda *a, **k: [{"id": "stale-proxy-model", "pricing": {"completion": "0.000001"},
                           "reasoning": {"supported": True, "allowed_efforts": ["low"]}}],
     )
@@ -119,16 +116,17 @@ def test_a_picker_probe_elsewhere_cannot_redirect_the_hooks(zerosignal_profile, 
     assert zerosignal_profile.supported_reasoning_efforts("stale-proxy-model") is None
 
 
-def test_a_stale_entry_is_still_served(zerosignal_profile, proxy_stub, monkeypatch):
+def test_a_stale_entry_is_still_served(zerosignal_profile, plugin_globals, proxy_stub, monkeypatch):
     """Past the TTL the hooks keep answering from the stale map while a refresh is scheduled.
     Returning None instead would unclamp the very requests the cache exists to protect."""
-    import sys
-
     base_url, _stub = proxy_stub
-    module = sys.modules[type(zerosignal_profile).__module__]
     zerosignal_profile.create_client(base_url=base_url, api_key="zerosignal-local")
-    monkeypatch.setattr(module, "_CATALOG_TTL_SECONDS", -1.0)  # everything is stale now
+    monkeypatch.setitem(plugin_globals, "_CATALOG_TTL_SECONDS", -1.0)  # everything is stale now
 
+    # Asked of the per-base read itself: through the hook alone, the sole-cached-entry rung
+    # in _cached_for would hand the same map back even if the stale read returned None.
+    stale = plugin_globals["_cached_catalog"](base_url)
+    assert stale is not None and "glm-5.3-flash" in stale
     assert zerosignal_profile.supported_reasoning_efforts("glm-5.3-flash") == ("low", "high", "max")
 
 

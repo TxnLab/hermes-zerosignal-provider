@@ -86,10 +86,14 @@ def test_responses_omits_reasoning_for_a_model_that_rejects_it(seeded):
         assert "reasoning" not in kwargs
 
 
-def test_responses_internal_disable_sends_no_reasoning_block(seeded):
-    """Hermes' auxiliary calls (titles, compression) pass ``enabled: False``."""
+def test_responses_internal_disable_sends_none_only_where_the_model_accepts_it(seeded):
+    """Hermes' auxiliary calls (titles, compression) pass ``enabled: False``. Omitting the
+    field would leave the model on its default effort, so the transport sends an explicit
+    ``none`` where the declared levels include it, and nothing where they do not — the same
+    split the chat wire makes below."""
     _profile, base_url, _stub = seeded
-    assert "reasoning" not in _responses({"enabled": False}, model="glm-5.2", base_url=base_url)
+    assert _responses({"enabled": False}, model="glm-5.2", base_url=base_url)["reasoning"] == {"effort": "none"}
+    assert "reasoning" not in _responses({"enabled": False}, model="glm-5.3-flash", base_url=base_url)
 
 
 def test_responses_carries_a_stable_session_correlator(seeded):
@@ -246,13 +250,12 @@ def test_chat_cold_cache_is_seeded_once_from_the_request_path(zerosignal_profile
     assert len(stub.seen_headers) == before + 1
 
 
-def test_chat_proxy_down_never_raises_and_does_not_retry_per_request(zerosignal_profile, dead_proxy_url, monkeypatch):
-    import sys
-
-    module = sys.modules[type(zerosignal_profile).__module__]
+def test_chat_proxy_down_never_raises_and_does_not_retry_per_request(
+    zerosignal_profile, plugin_globals, dead_proxy_url, monkeypatch
+):
     calls = []
-    real = module._fetch_catalog_items
-    monkeypatch.setattr(module, "_fetch_catalog_items", lambda *a, **k: calls.append(a) or real(*a, **k))
+    real = plugin_globals["_fetch_catalog_items"]
+    monkeypatch.setitem(plugin_globals, "_fetch_catalog_items", lambda *a, **k: calls.append(a) or real(*a, **k))
     for _ in range(3):
         assert _extras(zerosignal_profile, {"enabled": True, "effort": "medium"}, model="glm-5.3-flash", base_url=dead_proxy_url) \
             == ({}, {"reasoning_effort": "medium"})

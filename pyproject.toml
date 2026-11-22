@@ -10,14 +10,16 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "TxnLab" }]
-# Tracks hermes-agent's own requires-python.
-requires-python = ">=3.11,<3.14"
+# Tracks hermes-agent's own requires-python. CI tests 3.14 only: the pinned Hermes installs
+# its dependencies on 3.14 and nowhere else, so the lower bound is Hermes', not a tested one.
+requires-python = ">=3.11,<3.15"
 # The plugin has no runtime dependencies beyond Hermes itself, which loads it.
 dependencies = []
 
 [project.optional-dependencies]
 # Development only. hermes-agent itself is NOT listed here: its setup.py refuses to build a
-# wheel outside Nix, so it can only be installed editable from a checkout. The pinned commit
+# wheel outside Nix, so it is installed from a checkout at the pinned commit, through its own
+# uv.lock (which, from the pinned release, resolves on Python 3.14 only). The pinned commit
 # lives in [tool.hermes-zerosignal-provider] below; see README "Development" and
 # .github/workflows/validate.yml for the install steps.
 dev = ["pytest", "pyyaml"]
@@ -27,7 +29,7 @@ Homepage = "https://github.com/TxnLab/hermes-zerosignal-provider"
 Documentation = "https://docs.zerosignal.ai/using-the-proxy/guides/hermes"
 
 # This is a directory plugin (Hermes imports __init__.py from the plugin directory), not an
-# importable distribution: nothing is packaged. The project table exists so `pip install
+# importable distribution: nothing is packaged. The project table exists so `uv pip install
 # -e .[dev]` pulls the dev tools and so the Hermes pin has a home.
 [tool.setuptools]
 packages = []
@@ -37,7 +39,7 @@ py-modules = []
 # truth: the CI workflow reads it from here. Bump it, re-run `hermes plugins validate .`
 # and the tests, and note the upstream range in the commit message.
 [tool.hermes-zerosignal-provider]
-hermes_ref = "d5b3cad7b98b3bcd157ea8b585759b0bb4fb8a6d"
+hermes_ref = "caafe5389ae585ef77387a962aee05b1bcf17029"  # v0.23.3
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
