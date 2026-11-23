@@ -5,11 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+# The job runs code it does not control (Hermes and its whole locked dependency tree), and the
+# repo default token can write. Nothing here needs more than a read, so nothing else is granted.
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Same reason: the token is not left in .git/config for that code to find.
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
