@@ -1,5 +1,8 @@
 name: zerosignal
 kind: model-provider
 version: 0.2.0
+# First release containing d5b3cad, the earliest Hermes this code was validated against
+# (CI now pins v0.23.3). Hermes skips the plugin on an older release instead of loading it.
+requires_hermes: ">=0.21.6"
 description: ZeroSignal — local proxy onto a pay-per-request, private inference network
 author: TxnLab
